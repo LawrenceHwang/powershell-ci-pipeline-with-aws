@@ -1,0 +1,176 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: A serverless continuous integration pipeline for PowerShell module leveraging AWS services.
+Parameters:
+  GitHubUserName:
+    Description: The GitHub username
+    Type: String
+  GitHubRepoName:
+    Description: The GitHub repository name
+    Type: String
+  GitHubBranchName:
+    Description: The GitHub branch name to track
+    Type: String
+    Default: master
+  GitHubOAuthToken:
+    Description: The OAuth token for access GitHub. Use SSM Parameter Store in the future.
+    Type: String
+    NoEcho: True
+  NotificationEmailAdress:
+    Description: The email address you want to notity
+    Type: String
+  AritifactsBucketName:
+    Description: S3 bucke name for storing codepipelines related arfiacts
+    Type: String
+  CodeBuildImage:
+    Description: Image used in CodeBuild
+    Type: String
+    Default: microsoft/powershell
+Resources:
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess #TODO need to decrease IAM scope
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+      - CodeBuildServiceRole
+      - ArtifactStoreBucket
+    Properties:
+      Name: !Sub ${AWS::StackName}-codebuild
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !Ref: CodeBuildmage
+        PrivilegedMode: False
+        EnvironmentVariables:
+          - Name: ARTIFACTS_BUCKET_NAME
+            Value: !Ref ArtifactStoreBucket
+          - Name: ARTIFACTS_OBJECT_KEY
+            Value: 'api'
+      Source:
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess #TODO need to decrease IAM scope
+
+  CloudFormationServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess #TODO need to decrease IAM scope
+
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        -
+          Endpoint: !Ref NotificationEmailAdress
+          Protocol: email
+      DisplayName: !Sub ${AWS::StackName}-Topic
+
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-cicd-test
+      VersioningConfiguration:
+        Status: Enabled
+      AccessControl: BucketOwnerFullControl
+
+  CodePipelineProject:
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn:
+      - CodePipelineServiceRole
+      - CodeBuildProject
+      - CloudFormationServiceRole
+      - ArtifactStoreBucket
+    Properties:
+      Name: !Sub ${AWS::StackName}-codepipeline
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Stages:
+        -
+          Name: Source
+          Actions:
+            -
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts:
+                -
+                  Name: MyApp
+              Configuration:
+                Owner: !Ref GitHubUserName
+                Repo: !Ref GitHubRepoName
+                PollForSourceChanges: True
+                Branch: !Ref GitHubBranchName
+                OAuthToken: !Ref GitHubOAuthToken
+              RunOrder: 1
+        -
+          Name: Build
+          Actions:
+            -
+              Name: CodeBuild
+              InputArtifacts:
+                -
+                  Name: MyApp
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              OutputArtifacts:
+                -
+                  Name: MyAppBuild
+              RunOrder: 1
+
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: ArtifactStoreBucket
+Outputs:
