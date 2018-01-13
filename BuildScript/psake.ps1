@@ -22,23 +22,3 @@ task Test -depends Linting {
         throw
     }
 }
-
-<#
-task Build -depends Test { # module versioning..etc}
-
-task DeploytoS3 -depends Test {
-
-    $FileTime = (get-date).ToFileTime()
-
-    Compress-Archive -Path $PSScriptRoot\..\PSModule -DestinationPath "$PSScriptRoot\..\result.$FileTime.zip"
-
-    Initialize-AWSDefaults
-    Write-S3Object -BucketName 'pspipedpiperpipeline' -file "$PSScriptRoot\..\result.$FileTime.zip" -Region us-east-2
-
-    if ($testResults.FailedCount -gt 0) {
-        $testResults | Format-List
-        Write-Error -Message 'Pester test failed. Stopping build.'
-        throw
-    }
-}
-#>
