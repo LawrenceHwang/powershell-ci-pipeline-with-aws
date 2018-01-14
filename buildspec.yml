@@ -1,0 +1,27 @@
+version: 0.2
+
+env:
+  variables:
+    testvariable: 'test123'
+
+phases:
+  install:
+    commands:
+      - echo $testvariable
+      - pwsh ./BuildScript/InstallPhase.ps1 -CodeBuildID $CODEBUILD_BUILD_ID
+  pre_build:
+    commands:
+  build:
+    commands:
+      - echo $CODEBUILD_SRC_DIR
+      - echo $CODEBUILD_SOURCE_VERSION
+      - echo $CODEBUILD_RESOLVED_SOURCE_VERSION
+      - echo $CODEBUILD_INITIATOR
+      - echo $CODEBUILD_BUILD_IMAGE
+      - echo $CODEBUILD_BUILD_ID
+      - echo $CODEBUILD_SOURCE_REPO_URL
+      - pwsh ./BuildScript/BuildPhase.ps1 -CodeBuildID $CODEBUILD_BUILD_ID
+artifacts:
+  files:
+    - '**/*'
+  base-directory: PowerShellModule

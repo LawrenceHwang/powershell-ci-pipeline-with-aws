@@ -1,0 +1,306 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: A serverless continuous integration pipeline for PowerShell module leveraging AWS services.
+Parameters:
+  GitHubUserName:
+    Description: The GitHub username
+    Type: String
+  GitHubRepoName:
+    Description: The GitHub repository name
+    Type: String
+  GitHubBranchName:
+    Description: The GitHub branch name to track
+    Type: String
+    Default: master
+  GitHubToken:
+    Description: The GitHub personal access tokens. Token needs "public_repo  Access public repositories" access.
+    Type: String
+    NoEcho: True
+  NotificationEmailAdress:
+    Description: The email address you want to notity. A confirmation will be sent.
+    Type: String
+  CodeBuildImage:
+    Description: Image used in CodeBuild. Default to microsoft/powershell
+    Type: String
+    Default: microsoft/powershell
+Resources:
+  CodePipelineProject:
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn:
+      - CodePipelineServiceRole
+      - CodeBuildProjectTestStage
+      - CodeBuildProjectBuildStage
+      - ArtifactStoreBucket
+    Properties:
+      Name: !Sub ${AWS::StackName}-codepipeline
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Stages:
+        -
+          Name: Source
+          Actions:
+            -
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts:
+                -
+                  Name: MyApp
+              Configuration:
+                Owner: !Ref GitHubUserName
+                Repo: !Ref GitHubRepoName
+                PollForSourceChanges: True
+                Branch: !Ref GitHubBranchName
+                OAuthToken: !Ref GitHubToken
+              RunOrder: 1
+        -
+          Name: Test
+          Actions:
+            -
+              Name: TestUsingCodeBuild
+              InputArtifacts:
+                -
+                  Name: MyApp
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectTestStage
+              RunOrder: 1
+        -
+          Name: Build
+          Actions:
+            -
+              Name: BuildUsingCodeBuild
+              InputArtifacts:
+                -
+                  Name: MyApp
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectBuildStage
+              OutputArtifacts:
+                -
+                  # Note, the name is max 10 characters long.
+                  Name: Output
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: ArtifactStoreBucket
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+  CodeBuildProjectTestStage:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+      - CodeBuildServiceRole
+      - ArtifactStoreBucket
+    Properties:
+      Name: !Sub ${AWS::StackName}-codebuild-teststage
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image:
+          !Ref CodeBuildImage
+        PrivilegedMode: False
+        EnvironmentVariables:
+          - Name: Stage
+            Value: test
+      Source:
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+  CodeBuildProjectBuildStage:
+    Type: AWS::CodeBuild::Project
+    DependsOn:
+      - CodeBuildServiceRole
+      - ArtifactStoreBucket
+    Properties:
+      Name: !Sub ${AWS::StackName}-codebuild-buildstage
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image:
+          !Ref CodeBuildImage
+        PrivilegedMode: False
+        EnvironmentVariables:
+          - Name: Stage
+            Value: build
+      Source:
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+  CodeBuildServiceRolePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Resource: '*'
+            Action:
+              - 'logs:CreateLogGroup'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+          - Effect: Allow
+            Resource: '*'
+            Action:
+              - 's3:PutObject'
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+          - Effect: Allow
+            Resource:
+              - !Sub 'arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:!Ref CodePipelineProject'
+            Action:
+              - 'codecommit:*'
+              - 'codepipeline:*'
+      PolicyName: CodeBuildServiceRolePolicy
+      Roles:
+        - !Ref CodeBuildServiceRole
+  CodePipelineServiceRolePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Resource:
+              -
+                Fn::GetAtt:
+                  - ArtifactStoreBucket
+                  - Arn
+            Action:
+              - 's3:PutObject'
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:GetBucketVersioning'
+          - Action:
+              - 's3:PutObject'
+            Resource:
+              - 'arn:aws:s3:::codepipeline*'
+            Effect: Allow
+          - Action:
+              - 'codecommit:CancelUploadArchive'
+              - 'codecommit:GetBranch'
+              - 'codecommit:GetCommit'
+              - 'codecommit:GetUploadArchiveStatus'
+              - 'codecommit:UploadArchive'
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - 'cloudwatch:*'
+              - 's3:*'
+              - 'sns:*'
+            Resource: '*'
+            Effect: Allow
+          - Action:
+              - 'codebuild:BatchGetBuilds'
+              - 'codebuild:StartBuild'
+            Resource: '*'
+            Effect: Allow
+        Version: '2012-10-17'
+      PolicyName: CodePipelineServiceRolePolicy
+      Roles:
+        - !Ref CodePipelineServiceRole
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        -
+          Endpoint: !Ref NotificationEmailAdress
+          Protocol: email
+      DisplayName: !Sub ${AWS::StackName}-Topic
+  SNSTopicPolicy:
+    Type: "AWS::SNS::TopicPolicy"
+    Properties:
+      PolicyDocument:
+        Id: SNSTopicPolicy
+        Version: '2012-10-17'
+        Statement:
+        - Sid: sidsidsid
+          Effect: Allow
+          Principal:
+            Service:
+              - events.amazonaws.com
+          Action: sns:Publish
+          Resource: "*"
+      Topics:
+        - !Ref SNSTopic
+  CloudWatchEvent:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: CW for Email notification
+      EventPattern:
+        source:
+          - "aws.codepipeline"
+        detail-type:
+          -  "CodePipeline Stage Execution State Change"
+          #-  "CodePipeline Action Execution State Change"
+        detail:
+          state:
+            - "FAILED"
+            - "SUCCEEDED"
+            - "STARTED"
+      Targets:
+        -
+          Arn: !Ref SNSTopic
+          Id: "Email"
+          InputTransformer:
+            InputPathsMap:
+              pipeline: "$.detail.pipeline"
+              execution-id: "$.detail.execution-id"
+              stage: "$.detail.stage"
+              detail-type: "$.detail-type"
+              state: "$.detail.state"
+            InputTemplate: "\"The Pipeline <pipeline> is now in Stage- <stage>. State- <state>. Detail-type - <detail-type>. Execution ID - <execution-id>\""
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      AccessControl: BucketOwnerFullControl
+Outputs:
+  ArtifactStoreBucket:
+    Description: Artifact Store Bucket Name
+    Value: !Ref ArtifactStoreBucket
+  ArtifactStoreBucketArn:
+    Description: Artifact Store Bucket Arn
+    Value:
+      Fn::GetAtt:
+        - ArtifactStoreBucket
+        - Arn
