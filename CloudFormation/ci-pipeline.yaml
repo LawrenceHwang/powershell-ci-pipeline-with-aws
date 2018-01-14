@@ -183,7 +183,8 @@ Resources:
                 ProjectName: !Ref CodeBuildProject
               OutputArtifacts:
                 -
-                  Name: Test-Connection
+                  # Max 10 characters long
+                  Name: Output
               RunOrder: 1
       ArtifactStore:
         Type: S3
