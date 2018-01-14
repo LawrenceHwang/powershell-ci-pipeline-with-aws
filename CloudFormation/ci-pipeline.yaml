@@ -151,10 +151,26 @@ Resources:
                 OAuthToken: !Ref GitHubOAuthToken
               RunOrder: 1
         -
+          Name: Test
+          Actions:
+            -
+              Name: TestUsingCodeBuild
+              InputArtifacts:
+                -
+                  Name: MyApp
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              RunOrder: 1
+        -
           Name: Build
           Actions:
             -
-              Name: CodeBuild
+              Name: Build
               InputArtifacts:
                 -
                   Name: MyApp
