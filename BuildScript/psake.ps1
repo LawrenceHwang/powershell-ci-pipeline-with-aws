@@ -1,6 +1,6 @@
 task default -depends Test, Linting
 
-FormatTaskName "********* {0} ********* ^_^/"
+FormatTaskName "********* {0} *********"
 
 task Linting {
     $Lintingesults = Invoke-ScriptAnalyzer -Path $PSScriptRoot\..\PowerShellModule\Test-Connection\Public\Test-Connection.ps1 -Severity 'Error', 'Warning' -Recurse
