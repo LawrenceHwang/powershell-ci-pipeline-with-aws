@@ -19,7 +19,7 @@ Function Test-Connection {
   False
 
   #>
-  [CmdletBinding()]
+  [CmdletBinding()] makeitbeeak
   Param(
     [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
     [ValidateNotNullOrEmpty()]
